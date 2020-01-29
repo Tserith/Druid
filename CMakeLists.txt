@@ -6,11 +6,14 @@ include_directories(include)
 add_executable(stub src/stub.c src/chacha20.c)
 add_executable(druid src/packer.c src/chacha20.c)
 
-# necessary, resources not supported
+# necessary for stub - resources not supported
 set(STUB_LINK_FLAGS "/MANIFEST:NO")
 
-# not required, but used to make stub look nicer
-set_target_properties(stub PROPERTIES LINK_FLAGS "${STUB_LINK_FLAGS} /EMITPOGOPHASEINFO /ENTRY:main")
+# optional to hide console window of packed executable
+#set(STUB_LINK_FLAGS "${STUB_LINK_FLAGS} /SUBSYSTEM:WINDOWS")
+
+# not required, but used to make the stub look nicer
+set_target_properties(stub PROPERTIES LINK_FLAGS "${STUB_LINK_FLAGS} /EMITPOGOPHASEINFO /ENTRY:WinMain")
 set_target_properties(stub PROPERTIES COMPILE_FLAGS "/GS-")
 
 target_link_libraries(druid "Imagehlp.dll")

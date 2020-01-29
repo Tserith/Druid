@@ -23,7 +23,6 @@ int main(int argc, char* argv[])
 	strcpy(outFile, OUT_PREPEND);
 	strcat(outFile, argv[1]);
 
-	//DWORD a, b;MapFileAndCheckSumA("packed_popup.exe", &a, &b); printf("%x", b); exit(1);
 	// read in stub and input executables
 	stubSize = readFileRaw(STUB_FILE, &stub);
 	exeSize = readFileRaw(argv[1], &exe);
@@ -88,8 +87,8 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 {
 	BYTE key[KEY_SIZE];
 	HCRYPTPROV hProv;
-	ntHeader = (uint8_t*)* stub + ((IMAGE_DOS_HEADER*)* stub)->e_lfanew;
-	PIMAGE_SECTION_HEADER section = (uint8_t*)ntHeader + sizeof(IMAGE_NT_HEADERS);
+	ntHeader = (void*)((uint8_t*)* stub + ((IMAGE_DOS_HEADER*)* stub)->e_lfanew);
+	PIMAGE_SECTION_HEADER section = (void*)((uint8_t*)ntHeader + sizeof(IMAGE_NT_HEADERS));
 	PIMAGE_OPTIONAL_HEADER opHeader = &ntHeader->OptionalHeader;
 	
 	// generate 256-bit symmetric key
@@ -122,10 +121,10 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 		}
 		else if (!strcmp(section->Name, ".text"))
 		{
-			uint32_t sectionOffset = (uint8_t*)section - (uint8_t*)*stub;
+			uint32_t sectionOffset = (uint32_t)((uint8_t*)section - (uint8_t*)*stub);
 
 			// calculate and add to size
-			sizeIncrease = ((exeSize / opHeader->SectionAlignment) + 1) * opHeader->SectionAlignment;
+			sizeIncrease = (uint32_t)(((exeSize / opHeader->SectionAlignment) + 1) * opHeader->SectionAlignment);
 			section->Misc.VirtualSize += sizeIncrease;
 			section->SizeOfRawData += sizeIncrease;
 			ntHeader->OptionalHeader.SizeOfImage += sizeIncrease;
@@ -141,7 +140,7 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 
 			// recalculate section and headers
 			section = (PIMAGE_SECTION_HEADER)((uint8_t*)* stub + sectionOffset);
-			ntHeader = (uint8_t*)* stub + ((IMAGE_DOS_HEADER*)* stub)->e_lfanew;
+			ntHeader = (void*)((uint8_t*)* stub + ((IMAGE_DOS_HEADER*)* stub)->e_lfanew);
 			opHeader = &ntHeader->OptionalHeader;
 
 			// insert packed executable into section and fill extra space
@@ -154,10 +153,10 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 			uint32_t bytesCopied = 0;
 			while (bytesCopied < sizeIncrease)
 			{
-				uint32_t copySize = exeSize;
+				uint32_t copySize = (uint32_t)exeSize;
 
 				if (bytesCopied + exeSize >= sizeIncrease)
-					copySize = sizeIncrease - exeSize;
+					copySize = sizeIncrease - (uint32_t)exeSize;
 				
 				memcpy((uint8_t*)* stub + section->PointerToRawData + bytesCopied, *exe, copySize);
 				bytesCopied += copySize;
@@ -189,14 +188,14 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 	DWORD itableOffset = offset(itable.VirtualAddress, section);
 	if (itable.Size)
 	{
-		for (PIMAGE_IMPORT_DESCRIPTOR i = (uint8_t*)* stub + itableOffset; i->Name; i++)
+		for (PIMAGE_IMPORT_DESCRIPTOR i = (void*)((uint8_t*)* stub + itableOffset); i->Name; i++)
 		{
 			i->Characteristics += sizeIncrease;
 			i->Name += sizeIncrease;
 			i->FirstThunk += sizeIncrease;
 
 			// 64 bit
-			for (uint64_t* j = (uint8_t*)* stub + offset(i->Characteristics, section); *j; j++)
+			for (uint64_t* j = (void*)((uint8_t*)* stub + offset(i->Characteristics, section)); *j; j++)
 			{
 				if (!(*j & 0x8000000000000000)) // if not importing by ordinal
 				{
@@ -208,19 +207,21 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 
 	// fix relocation virtual addresses
 	IMAGE_DATA_DIRECTORY rtable = opHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
-	uint16_t rtableOffset = offset(rtable.VirtualAddress, section);
-	uint64_t rtableEnd = (uint8_t*)* stub + rtableOffset + rtable.Size;
+	DWORD rtableOffset = offset(rtable.VirtualAddress, section);
+	PIMAGE_BASE_RELOCATION rtableEnd = (void*)((uint8_t*)* stub + rtableOffset + rtable.Size);
 	if (rtable.Size)
 	{
-		for (PIMAGE_BASE_RELOCATION i = (uint8_t*)* stub + rtableOffset; i < rtableEnd; (uint8_t*)i += i->SizeOfBlock)
+		for (PIMAGE_BASE_RELOCATION i = (void*)((uint8_t*)* stub + rtableOffset);
+			i < rtableEnd;
+			(uint8_t*)i += i->SizeOfBlock)
 		{
 			i->VirtualAddress += sizeIncrease;
 			
-			uint16_t* reloc = (uint8_t*)i + sizeof(IMAGE_BASE_RELOCATION);
+			uint16_t* reloc = (void*)((uint8_t*)i + sizeof(IMAGE_BASE_RELOCATION));
 
-			for (uint16_t* j = reloc; j < reloc + i->SizeOfBlock; j++)
+			for (uint16_t* j = reloc; j < (uint16_t*)((uint8_t*)i + i->SizeOfBlock); j++)
 			{
-				uint16_t relocOffset = offset(i->VirtualAddress + (*j & 0xFFF), section);
+				DWORD relocOffset = offset(i->VirtualAddress + (*j & 0xFFF), section);
 
 				if ((*j >> 12 == IMAGE_REL_BASED_HIGHLOW))
 				{
@@ -236,11 +237,11 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 
 	// fix exception virtual addresses
 	IMAGE_DATA_DIRECTORY etable = opHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
-	uint16_t etableOffset = offset(etable.VirtualAddress, section);
-	uint64_t etableEnd = (uint8_t*)* stub + etableOffset + etable.Size;
+	DWORD etableOffset = offset(etable.VirtualAddress, section);
+	PIMAGE_RUNTIME_FUNCTION_ENTRY etableEnd = (void*)((uint8_t*)* stub + etableOffset + etable.Size);
 	if (etable.Size)
 	{
-		for (PIMAGE_RUNTIME_FUNCTION_ENTRY i = (uint8_t*)* stub + etableOffset; i < etableEnd; i++)
+		for (PIMAGE_RUNTIME_FUNCTION_ENTRY i = (void*)((uint8_t*)* stub + etableOffset); i < etableEnd; i++)
 		{
 			i->UnwindInfoAddress += sizeIncrease;
 		}
@@ -250,7 +251,7 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 	section = (PIMAGE_SECTION_HEADER)((uint8_t*)* stub + dataOffset);
 
 	memcpy((uint8_t*)* stub + section->PointerToRawData, key, KEY_SIZE);
-	*(void**)((uint8_t*)* stub + section->PointerToRawData + KEY_SIZE)= opHeader->ImageBase + packedOffset;
+	*(void**)((uint8_t*)* stub + section->PointerToRawData + KEY_SIZE) = (void*)(opHeader->ImageBase + packedOffset);
 	*(size_t*)((uint8_t*)* stub + section->PointerToRawData + KEY_SIZE + sizeof(void*)) = exeSize;
 
 	// write stub to disk

