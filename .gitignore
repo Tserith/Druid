@@ -6,3 +6,5 @@
 !src/*.c
 !include
 !include/*.h
+!img
+!img/*.PNG
