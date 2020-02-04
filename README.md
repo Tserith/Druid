@@ -10,7 +10,7 @@ This project was done purely for educational purposes. In the essence of time, l
 
 - Supports a customizable stub
 
-- Stub has no symbols, imports, strings, or extra sections
+- Stub has no strings, imports, or extra sections
 
   ![](img/idaStub.PNG)
 
@@ -20,5 +20,5 @@ This project was done purely for educational purposes. In the essence of time, l
 
 - Only supports executables
 - Stub doesn't support symbols or resources
-- Does not support import forwarding
+- Does not support delayed or forwarded imports
 - Does not enforce page protections

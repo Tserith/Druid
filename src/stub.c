@@ -1,79 +1,70 @@
 #include "stub.h"
 
-// declare key, exe ptr, and size in .data section to be added by packer
+// declare key, exe ptr, and size in .data section to be initialized by packer
 uint8_t key[KEY_SIZE] = { 0xFF };
 void* encrypted_exe = &key; // dereference ptr for reloc entry
 uint32_t size = 1;
 
 char xorKey[] = { 0x2f, 0x84, 0x18, 0x8e, 0x13, 0xaa, 0x49, 0xed, 0xa7, 0x57, 0xda, 0x2b, 0xf4, 0x61, 0x8b };
-char sGetProcAddress[] = { 0x68, 0xe1, 0x6c, 0xde, 0x61, 0xc5, 0x2a, 0xac, 0xc3, 0x33, 0xa8, 0x4e, 0x87, 0x12, 0x8b };
-char sVirtualAlloc[] = { 0x79, 0xed, 0x6a, 0xfa, 0x66, 0xcb, 0x25, 0xac, 0xcb, 0x3b, 0xb5, 0x48, 0xf4 };
-char sLoadLibraryA[] = { 0x63, 0xeb, 0x79, 0xea, 0x5f, 0xc3, 0x2b, 0x9f, 0xc6, 0x25, 0xa3, 0x6a, 0xf4 };
-char sExitProcess[] = { 0x6a, 0xfc, 0x71, 0xfa, 0x43, 0xd8, 0x26, 0x8e, 0xc2, 0x24, 0xa9, 0x2b };
+char strGetProcAddress[] = { 0x68, 0xe1, 0x6c, 0xde, 0x61, 0xc5, 0x2a, 0xac, 0xc3, 0x33, 0xa8, 0x4e, 0x87, 0x12, 0x8b };
+char strVirtualAlloc[] = { 0x79, 0xed, 0x6a, 0xfa, 0x66, 0xcb, 0x25, 0xac, 0xcb, 0x3b, 0xb5, 0x48, 0xf4 };
+char strLoadLibraryA[] = { 0x63, 0xeb, 0x79, 0xea, 0x5f, 0xc3, 0x2b, 0x9f, 0xc6, 0x25, 0xa3, 0x6a, 0xf4 };
+char strExitProcess[] = { 0x6a, 0xfc, 0x71, 0xfa, 0x43, 0xd8, 0x26, 0x8e, 0xc2, 0x24, 0xa9, 0x2b };
 void* (*xGetProcAddress)(void*, uint8_t*) = NULL;
 void* (*xVirtualAlloc)(void*, SIZE_T, DWORD, DWORD) = NULL;
 void* (*xLoadLibraryA)(uint8_t*) = NULL;
-void (*xExitProcess)(UINT) = NULL;
 
-int WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
+PIMAGE_OPTIONAL_HEADER opHeader;
+PIMAGE_SECTION_HEADER section;
+
+uint8_t* findKernel32Base()
 {
-	void* exe = NULL;
-	uint8_t* program = NULL;
-	chacha20_ctx ctx;
-	PIMAGE_OPTIONAL_HEADER opHeader;
-	PIMAGE_SECTION_HEADER section;
-
-	// find kernel32.dll
 	PPEB peb = *(PPEB*)(_readgsbase_u64() + 0x60);
 	PPEB_LDR_DATA ldr = peb->Ldr;
-	PLIST_ENTRY modules = ldr->InMemoryOrderModuleList.Flink;
-	PLIST_ENTRY thisImage = modules->Flink;
-	uint8_t* ntdll = (uint8_t*)thisImage->Flink;
-	uint8_t* kernel32 = *(uint8_t**)(ntdll + (sizeof(PVOID) * 4));
-	
-	// find GetProcAddress
-	ntHeader = (PIMAGE_NT_HEADERS)((uint8_t*)kernel32 + ((IMAGE_DOS_HEADER*)kernel32)->e_lfanew);
-	opHeader = &ntHeader->OptionalHeader;
+	PLIST_ENTRY thisImage = ldr->InMemoryOrderModuleList.Flink;
+	PLIST_ENTRY ntdll = thisImage->Flink;
+	uint8_t* kernel32 = (uint8_t*)ntdll->Flink;
+	return *(void**)(kernel32 + (sizeof(PVOID) * 4));
+}
+
+void decryptStrings()
+{
+	for (int i = 0; i < sizeof(strGetProcAddress); i++)
+	{
+		strGetProcAddress[i] ^= xorKey[i];
+	}
+	for (int i = 0; i < sizeof(strVirtualAlloc); i++)
+	{
+		strVirtualAlloc[i] ^= xorKey[i];
+	}
+	for (int i = 0; i < sizeof(strLoadLibraryA); i++)
+	{
+		strLoadLibraryA[i] ^= xorKey[i];
+	}
+}
+
+BOOL findGetProcAddress(uint8_t* base)
+{
 	IMAGE_DATA_DIRECTORY etable = opHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-	PIMAGE_EXPORT_DIRECTORY exports = (void*)(kernel32 + etable.VirtualAddress);
-
-	// decrypt function name strings
-	for (int i = 0; i < sizeof(sGetProcAddress); i++)
-	{
-		sGetProcAddress[i] ^= xorKey[i];
-	}
-	for (int i = 0; i < sizeof(sVirtualAlloc); i++)
-	{
-		sVirtualAlloc[i] ^= xorKey[i];
-	}
-	for (int i = 0; i < sizeof(sLoadLibraryA); i++)
-	{
-		sLoadLibraryA[i] ^= xorKey[i];
-	}
-	for (int i = 0; i < sizeof(sExitProcess); i++)
-	{
-		sExitProcess[i] ^= xorKey[i];
-	}
-
-	// find GetProcAddress in exports of kernel32.dll
-	uint32_t* exportFunc = (void*)(kernel32 + exports->AddressOfFunctions);
-	uint32_t* exportName = (void*)(kernel32 + exports->AddressOfNames);
-	uint16_t* exportOrdinal = (void*)(kernel32 + exports->AddressOfNameOrdinals);
+	PIMAGE_EXPORT_DIRECTORY exports = (void*)(base + etable.VirtualAddress);
+	uint32_t* exportFunc = (void*)(base + exports->AddressOfFunctions);
+	uint32_t* exportName = (void*)(base + exports->AddressOfNames);
+	uint16_t* exportOrdinal = (void*)(base + exports->AddressOfNameOrdinals);
 
 	for (uint16_t i = 0; i < exports->NumberOfNames; i++)
 	{
-		uint8_t* name = kernel32 + exportName[i];
+		uint8_t* name = base + exportName[i];
 		BOOL equal = TRUE;
 
 		// strcmp
-		for (int j = 0; sGetProcAddress[j] != '\0'; j++)
+		for (int j = 0; strGetProcAddress[j] != '\0'; j++)
 		{
 			if (name[j] == '\0')
 			{
 				equal = FALSE;
 				break;
 			}
-			if (name[j] != sGetProcAddress[j])
+			if (name[j] != strGetProcAddress[j])
 				equal = FALSE;
 		}
 
@@ -81,67 +72,46 @@ int WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int 
 		{
 			uint32_t rva = exportFunc[exportOrdinal[i]];
 
-			xGetProcAddress = (void*)(kernel32 + rva);
+			xGetProcAddress = (void*)(base + rva);
+			return TRUE;
 		}
 	}
 
-	// resolve other functions
-	xVirtualAlloc = xGetProcAddress(kernel32, sVirtualAlloc);
-	xLoadLibraryA = xGetProcAddress(kernel32, sLoadLibraryA);
-	xExitProcess = xGetProcAddress(kernel32, sExitProcess);
+	return FALSE;
+}
 
-	if (size < 2) xExitProcess(1); // stub doesn't execute alone
+uint32_t calcVAsize()
+{
+	uint32_t size = 0;
 
-	exe = xVirtualAlloc(
-		NULL,
-		size,
-		MEM_COMMIT | MEM_RESERVE,
-		PAGE_EXECUTE_READWRITE
-	);
-	if (!exe) xExitProcess(1);
-	
-	// decrypt executable
-	chacha20_setup(&ctx, key, KEY_SIZE, key); // confidentiality is not a priority
-	chacha20_decrypt(&ctx, encrypted_exe, exe, size);
-
-	// manually load executable into memory
-	ntHeader = (PIMAGE_NT_HEADERS)((uint8_t*)exe + ((IMAGE_DOS_HEADER*)exe)->e_lfanew);
-	opHeader = &ntHeader->OptionalHeader;
-	uint32_t vaSize = 0;
-
-	section = IMAGE_FIRST_SECTION(ntHeader);
 	for (int i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
 	{
-		if (section->VirtualAddress > vaSize)
+		if (section->VirtualAddress > size)
 		{
-			vaSize = section->VirtualAddress + section->SizeOfRawData;
+			size = section->VirtualAddress + section->SizeOfRawData;
 		}
 		section++;
 	}
 
-	program = xVirtualAlloc(
-		NULL,
-		vaSize,
-		MEM_COMMIT | MEM_RESERVE,
-		PAGE_EXECUTE_READWRITE
-	);
-	if (!program) xExitProcess(1);
+	return size;
+}
 
-	// load sections
-	section = IMAGE_FIRST_SECTION(ntHeader);
+void loadSections(uint8_t* vAddr, uint8_t* exe)
+{
 	for (DWORD i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
 	{
 		// memcpy
 		for (DWORD j = 0; j < section->SizeOfRawData; j++)
 		{
-			(program + section->VirtualAddress)[j] = ((uint8_t*)exe + section->PointerToRawData)[j];
+			(vAddr + section->VirtualAddress)[j] = ((uint8_t*)exe + section->PointerToRawData)[j];
 		}
 
 		section++;
 	}
+}
 
-	// dynamically load imports
-	section = IMAGE_FIRST_SECTION(ntHeader);
+int loadImports(uint8_t* vAddr, uint8_t* exe)
+{
 	IMAGE_DATA_DIRECTORY itable = opHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 	DWORD itableOffset = offset(itable.VirtualAddress, section);
 	if (itable.Size)
@@ -149,7 +119,7 @@ int WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int 
 		for (PIMAGE_IMPORT_DESCRIPTOR i = (void*)((uint8_t*)exe + itableOffset); i->Name; i++)
 		{
 			HMODULE module = xLoadLibraryA((uint8_t*)exe + offset(i->Name, section));
-			if (!module) xExitProcess(1);
+			if (!module) return -1;
 
 			// 64 bit
 			int k = 0;
@@ -168,13 +138,17 @@ int WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int 
 					importFunc = xGetProcAddress(module, (uint8_t*)&hint->Name);
 				}
 
-				((uint64_t*)(program + i->FirstThunk))[k] = (uint64_t)importFunc;
+				((uint64_t*)(vAddr + i->FirstThunk))[k] = (uint64_t)importFunc;
 			}
 		}
 	}
-	
-	// fix relocations
-	int64_t aslrOffset = (uint64_t)program - opHeader->ImageBase;
+
+	return 0;
+}
+
+void fixRelocations(uint8_t* vAddr, uint8_t* exe)
+{
+	int64_t aslrOffset = (uint64_t)vAddr - opHeader->ImageBase;
 
 	IMAGE_DATA_DIRECTORY rtable = opHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
 	DWORD rtableOffset = offset(rtable.VirtualAddress, section);
@@ -193,16 +167,79 @@ int WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int 
 
 				if (*j >> 12 == IMAGE_REL_BASED_DIR64)
 				{
-					*(uint64_t*)(program + relocOffset) += aslrOffset;
+					*(uint64_t*)(vAddr + relocOffset) += aslrOffset;
 				}
 			}
 		}
 	}
+}
+
+int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
+{
+	// find vAddr of kernel32.dll
+	uint8_t* kernel32Base = findKernel32Base();
+	
+	// decrypt function name strings
+	decryptStrings();
+
+	// find GetProcAddress
+	ntHeader = (PIMAGE_NT_HEADERS)(kernel32Base + ((IMAGE_DOS_HEADER*)kernel32Base)->e_lfanew);
+	opHeader = &ntHeader->OptionalHeader;
+
+	if (!findGetProcAddress(kernel32Base))
+		return -1;
+
+	// resolve other functions
+	xVirtualAlloc = xGetProcAddress(kernel32Base, strVirtualAlloc);
+	xLoadLibraryA = xGetProcAddress(kernel32Base, strLoadLibraryA);
+
+	if (size < 2) return -1; // stub doesn't execute alone
+
+	// allocate memory for unpacked program
+	void* decrypted_exe = xVirtualAlloc(
+		NULL,
+		size,
+		MEM_COMMIT | MEM_RESERVE,
+		PAGE_EXECUTE_READWRITE
+	);
+	if (!decrypted_exe) return -1;
+	
+	// decrypt executable
+	chacha20_ctx ctx;
+	chacha20_setup(&ctx, key, KEY_SIZE, key); // confidentiality is not a priority
+	chacha20_decrypt(&ctx, encrypted_exe, decrypted_exe, size);
+
+	// manually load executable into memory
+	ntHeader = (PIMAGE_NT_HEADERS)((uint8_t*)decrypted_exe + ((IMAGE_DOS_HEADER*)decrypted_exe)->e_lfanew);
+	section = IMAGE_FIRST_SECTION(ntHeader);
+	opHeader = &ntHeader->OptionalHeader;
+
+	// allocate memory for executable to be loaded
+	uint32_t vaSize = calcVAsize();
+	uint8_t* program = xVirtualAlloc(
+		NULL,
+		vaSize,
+		MEM_COMMIT | MEM_RESERVE,
+		PAGE_EXECUTE_READWRITE
+	);
+	if (!program) return -1;
+
+	// load sections
+	section = IMAGE_FIRST_SECTION(ntHeader);
+	loadSections(program, decrypted_exe);
+
+	// dynamically load imports
+	section = IMAGE_FIRST_SECTION(ntHeader);
+	if (loadImports(program, decrypted_exe))
+		return -1;
+	
+	// fix relocations
+	fixRelocations(program, decrypted_exe);
 
 	// execute decrypted program
-	void (*binary)() = (void*)(program + opHeader->AddressOfEntryPoint);
+	void (*entry)() = (void*)(program + opHeader->AddressOfEntryPoint);
 
-	binary();
+	entry();
 
 	return 0;
 }
