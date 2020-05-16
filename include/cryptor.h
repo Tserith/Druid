@@ -5,7 +5,7 @@
 #include "stub.h"
 
 #define STUB_FILE "stub.exe"
-#define OUT_PREPEND "packed_"
+#define OUT_PREPEND "druid_"
 
 long readFileRaw(char* file, void** buf);
 long pack(void** exe, void** stub, size_t exeSize, size_t stubSize);

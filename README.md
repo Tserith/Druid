@@ -1,6 +1,6 @@
 # Druid
 
-This project was done purely for educational purposes. In the essence of time, little effort was allocated toward safely parsing input files. Do **not** pack programs you did not compile yourself.
+This project was done purely for educational purposes. In the essence of time, little effort was allocated toward safely parsing input files. Do **not** input programs you did not compile yourself.
 
 
 

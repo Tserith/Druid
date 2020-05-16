@@ -1,13 +1,13 @@
-#include "packer.h"
+#include "cryptor.h"
 
 char* outFile;
 
 int main(int argc, char* argv[])
 {
-	long stubSize, exeSize, packedSize;
+	long stubSize, exeSize, encryptedSize;
 	void* stub, * exe;
 
-	printf("[Druid] A simple polymorphic packer - Written by Tserith\n\n");
+	printf("[Druid] A simple cryptor - Written by Tserith\n\n");
 
 	if ((unsigned int)argc < 2)
 	{
@@ -29,17 +29,17 @@ int main(int argc, char* argv[])
 
 	printf("[+] Read in %s and %s\n", STUB_FILE, argv[1]);
 
-	// pack executable
-	packedSize = pack(&exe, &stub, exeSize, stubSize);
-	if (packedSize < stubSize)
+	// encrypt executable
+	encryptedSize = build(&exe, &stub, exeSize, stubSize);
+	if (encryptedSize < stubSize)
 	{
-		printf("[-] An error occured while packing\n");
+		printf("[-] An error occured while building\n");
 		exit(1);
 	}
 
-	printf("[+] Packed %s\n", argv[1]);
+	printf("[+] Built %s\n", argv[1]);
 
-	// write packed executable to disk
+	// write encrypted executable to disk
 	FILE* fd = fopen(outFile, "wb");
 	if (!fd)
 	{
@@ -47,10 +47,10 @@ int main(int argc, char* argv[])
 		exit(1);
 	}
 	
-	fwrite(stub, 1, packedSize, fd);
+	fwrite(stub, 1, encryptedSize, fd);
 	fclose(fd);
 
-	printf("[+] Wrote packed %s binary to disk\n", outFile);
+	printf("[+] Wrote encrypted %s binary to disk\n", outFile);
 
 	free(outFile);
 	free(stub);
@@ -83,7 +83,7 @@ long readFileRaw(char* file, void** buf)
 	return fsize;
 }
 
-long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
+long build(void** exe, void** stub, size_t exeSize, size_t stubSize)
 {
 	BYTE key[KEY_SIZE];
 	HCRYPTPROV hProv;
@@ -103,14 +103,14 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 
 	printf("[+] Encryption Finished\n");
 	
-	uint32_t packedOffset = 0;
+	uint32_t encryptedOffset = 0;
 	uint32_t dataOffset = 0;
 	uint32_t sizeIncrease = 0;
 	
 	// insert encrypted executable at the beginning of the stub's text section
 	for (int i = 0; i < ntHeader->FileHeader.NumberOfSections; i++)
 	{
-		if (packedOffset) // .text section found
+		if (encryptedOffset) // .text section found
 		{
 			// fix up pointers in later section headers
 			if (section->SizeOfRawData) // not uninitiallized data
@@ -131,9 +131,9 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 			opHeader->SizeOfCode += sizeIncrease;
 			opHeader->AddressOfEntryPoint += sizeIncrease;
 
-			packedOffset = section->VirtualAddress;
+			encryptedOffset = section->VirtualAddress;
 
-			// resize stub, shift data, insert packed executable
+			// resize stub, shift data, insert encrypted executable
 			stubSize += sizeIncrease;
 			*stub = realloc(*stub, stubSize);
 			if (!*stub) mFailure();
@@ -143,7 +143,7 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 			ntHeader = (void*)((uint8_t*)* stub + ((IMAGE_DOS_HEADER*)* stub)->e_lfanew);
 			opHeader = &ntHeader->OptionalHeader;
 
-			// insert packed executable into section and fill extra space
+			// insert encrypted executable into section and fill extra space
 			memmove(
 				(uint8_t*)* stub + section->PointerToRawData + sizeIncrease,
 				(uint8_t*)* stub + section->PointerToRawData,
@@ -171,7 +171,7 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 		section++;
 	}
 
-	if (!packedOffset || !dataOffset) exit(1); // couldn't find .text and .data sections
+	if (!encryptedOffset || !dataOffset) exit(1); // couldn't find .text and .data sections
 	
 	// fix table pointers
 	for (int i = 0; i < 15; i++)
@@ -251,7 +251,7 @@ long pack(void** exe, void** stub, size_t exeSize, size_t stubSize)
 	section = (PIMAGE_SECTION_HEADER)((uint8_t*)* stub + dataOffset);
 
 	memcpy((uint8_t*)* stub + section->PointerToRawData, key, KEY_SIZE);
-	*(void**)((uint8_t*)* stub + section->PointerToRawData + KEY_SIZE) = (void*)(opHeader->ImageBase + packedOffset);
+	*(void**)((uint8_t*)* stub + section->PointerToRawData + KEY_SIZE) = (void*)(opHeader->ImageBase + encryptedOffset);
 	*(size_t*)((uint8_t*)* stub + section->PointerToRawData + KEY_SIZE + sizeof(void*)) = exeSize;
 
 	// write stub to disk

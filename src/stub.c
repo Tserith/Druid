@@ -1,6 +1,6 @@
 #include "stub.h"
 
-// declare key, exe ptr, and size in .data section to be initialized by packer
+// declare key, exe ptr, and size in .data section to be initialized by cryptor
 uint8_t key[KEY_SIZE] = { 0xFF };
 void* encrypted_exe = &key; // dereference ptr for reloc entry
 uint32_t size = 1;
@@ -195,7 +195,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 
 	if (size < 2) return -1; // stub doesn't execute alone
 
-	// allocate memory for unpacked program
+	// allocate memory for unencrypted program
 	void* decrypted_exe = xVirtualAlloc(
 		NULL,
 		size,

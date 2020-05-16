@@ -4,12 +4,12 @@ set(CMAKE_BUILD_TYPE Release)
 include_directories(include)
 
 add_executable(stub src/stub.c src/chacha20.c)
-add_executable(druid src/packer.c src/chacha20.c)
+add_executable(druid src/cryptor.c src/chacha20.c)
 
 # necessary for stub - resources not supported
 set(STUB_LINK_FLAGS "/MANIFEST:NO")
 
-# optional to hide console window of packed executable
+# optional to hide console window of encrypted executable
 #set(STUB_LINK_FLAGS "${STUB_LINK_FLAGS} /SUBSYSTEM:WINDOWS")
 
 # not required, but used to make the stub look nicer
