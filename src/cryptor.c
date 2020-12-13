@@ -24,10 +24,19 @@ int main(int argc, char* argv[])
 	strcat(outFile, argv[1]);
 
 	// read in stub and input executables
-	stubSize = readFileRaw(STUB_FILE, &stub);
+
 	exeSize = readFileRaw(argv[1], &exe);
 
-	printf("[+] Read in %s and %s\n", STUB_FILE, argv[1]);
+	if (!strcmp(&argv[1][strlen(argv[1]) - 4], ".dll"))
+	{
+		stubSize = readFileRaw(STUB_FILE_DLL, &stub);
+		printf("[+] Read in %s and %s\n", STUB_FILE_DLL, argv[1]);
+	}
+	else
+	{
+		stubSize = readFileRaw(STUB_FILE, &stub);
+		printf("[+] Read in %s and %s\n", STUB_FILE, argv[1]);
+	}
 
 	// encrypt executable
 	encryptedSize = build(&exe, &stub, exeSize, stubSize);

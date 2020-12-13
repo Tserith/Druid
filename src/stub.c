@@ -174,7 +174,11 @@ void fixRelocations(uint8_t* vAddr, uint8_t* exe)
 	}
 }
 
+#ifndef STUB_DLL
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
+#else
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
+#endif
 {
 	// find vAddr of kernel32.dll
 	uint8_t* kernel32Base = findKernel32Base();
@@ -237,9 +241,11 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 	fixRelocations(program, decrypted_exe);
 
 	// execute decrypted program
-	void (*entry)() = (void*)(program + opHeader->AddressOfEntryPoint);
+	int (*entry)() = (void*)(program + opHeader->AddressOfEntryPoint);
 
-	entry();
-
-	return 0;
+#ifndef STUB_DLL
+	return entry();
+#else
+	return entry(hinstDLL, fdwReason, lpReserved);
+#endif
 }

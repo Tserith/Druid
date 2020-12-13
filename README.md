@@ -18,7 +18,7 @@ This project was done purely for educational purposes. In the essence of time, l
 
 ## Limitations
 
-- Only supports executables
 - Stub doesn't support symbols or resources
 - Does not support delayed or forwarded imports
+- Does not support exports
 - Does not enforce page protections
